@@ -1,11 +1,13 @@
 # Taller 3D
 
-App para iPhone para mi negocio de impresión 3D: cotizador con precio sugerido, seguimiento de pedidos, generador de guías de envío y billetera de ingresos y retiros.
+App para un taller de impresión 3D: cotizador, seguimiento de pedidos, guías de envío y billetera.
 
-Es un solo archivo (`index.html`), sin instalación ni servidor. Los datos se guardan en el propio dispositivo.
+Abrir: https://mizrainpablo21.github.io/taller3d/
 
-## Usarla en el iPhone
+## Avance en vivo de la impresora Bambu Lab
 
-1. En GitHub: Settings > Pages > Source: `main` / `(root)`.
-2. Abre la dirección `https://TU-USUARIO.github.io/NOMBRE-DEL-REPO/` en Safari.
-3. Compartir > Agregar a pantalla de inicio.
+1. `pip install paho-mqtt`
+2. `python3 bambu_puente.py` (pide IP, serial y código de acceso de la impresora)
+3. En la app: Ajustes > Impresora Bambu Lab > "Usar avance en vivo"
+
+`python3 bambu_puente.py --demo` simula una impresión para probar.
