@@ -16,7 +16,7 @@ Datos que necesitas (en la pantalla de la impresora: Ajustes > WLAN / Red):
 Activa también el "Modo LAN" si tu modelo lo pide. El código se usa solo en
 tu computadora y no se guarda en ningún archivo.
 """
-import argparse, getpass, json, os, ssl, sys, threading, time
+import argparse, getpass, json, os, ssl, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STATE = {"connected": False, "state": "IDLE", "percent": 0, "remainMin": 0,
@@ -113,6 +113,40 @@ def run_mqtt(ip, serial, code):
         except Exception:
             pass
 
+def gh(method, path, token, body=None):
+    req = urllib.request.Request("https://api.github.com" + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+                 "User-Agent": "taller3d-puente", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read() or b"{}")
+
+def run_gist(token):
+    """Publica el estado en un Gist secreto para verlo desde cualquier red."""
+    cfg = load_cfg()
+    gid = cfg.get("gist_id")
+    last, last_t = None, 0
+    while True:
+        with LOCK:
+            d = dict(STATE)
+        d["updated"] = int(time.time())
+        sig = (d["connected"], d["state"], int(d["percent"] or 0), int(d["remainMin"] or 0), d["layer"])
+        if sig != last or time.time() - last_t > 120:
+            files = {"estado.json": {"content": json.dumps(d)}}
+            try:
+                if not gid:
+                    g = gh("POST", "/gists", token, {"description": "Taller 3D - estado de la impresora",
+                                                     "public": False, "files": files})
+                    gid = g["id"]
+                    cfg = load_cfg(); cfg["gist_id"] = gid; save_cfg(cfg)
+                    print("Nube lista. ID para la app (Ajustes > Impresora Bambu Lab): %s" % gid)
+                else:
+                    gh("PATCH", "/gists/" + gid, token, {"files": files})
+                last, last_t = sig, time.time()
+            except Exception as e:
+                print("No pude publicar en la nube (%s). Reintento en un momento." % e)
+        time.sleep(20)
+
 def run_demo():
     total = 90  # minutos simulados
     t0 = time.time()
@@ -180,6 +214,15 @@ def main():
                 save_cfg({"ip": ip, "serial": serial, "code": code})
                 print("Guardado en %s" % CFG)
         threading.Thread(target=run_mqtt, args=(ip, serial, code), daemon=True).start()
+    tok = os.environ.get("BAMBU_GH_TOKEN") or load_cfg().get("gh_token")
+    if not a.demo and not tok and sys.stdin and sys.stdin.isatty():
+        print("Para ver el avance fuera de tu red necesitas un token de GitHub (ver LEEME).")
+        tok = getpass.getpass("Token de GitHub (Enter para omitir): ").strip()
+        if tok:
+            c = load_cfg(); c["gh_token"] = tok; save_cfg(c)
+    if tok:
+        threading.Thread(target=run_gist, args=(tok,), daemon=True).start()
+        print("Publicando el avance en la nube (Gist secreto).")
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
     print("Listo. La app puede leer http://localhost:%d/status  (Ctrl+C para cerrar)" % a.port)
     try:

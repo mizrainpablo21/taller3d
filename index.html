@@ -1100,20 +1100,36 @@ function dueLabel(o){
 }
 var bambu={ok:false,t:0,d:null,err:'',sig:''};
 function bambuOn(){return !!S.settings.bambuOn}
-function bambuFresh(){return bambu.ok&&bambu.d&&Date.now()-bambu.t<20000}
+function bambuFresh(){return bambu.ok&&bambu.d&&Date.now()-bambu.t<(bambu.via==='nube'?110000:20000)}
 function liveOrder(){return S.orders.filter(function(o){return o.estado==='imprimiendo'})[0]}
 function bambuUrl(){return String(S.settings.bambuUrl||'http://localhost:8765').replace(/\/+$/,'')}
+function bambuGist(){return String(S.settings.bambuGist||'').trim()}
 function bambuStatusTxt(){
   if(!bambuOn())return 'Apagado.';
-  if(bambuFresh()){var d=bambu.d;return 'Conectado · '+({RUNNING:'imprimiendo',PAUSE:'en pausa',FINISH:'terminó',IDLE:'libre',PREPARE:'preparando',FAILED:'con error'}[d.state]||d.state)+(d.state==='RUNNING'?' · '+Math.round(num(d.percent))+'%':'')}
+  if(bambuFresh()){var d=bambu.d;return 'Conectado'+(bambu.via==='nube'?' por la nube':'')+' · '+({RUNNING:'imprimiendo',PAUSE:'en pausa',FINISH:'terminó',IDLE:'libre',PREPARE:'preparando',FAILED:'con error'}[d.state]||d.state)+(d.state==='RUNNING'?' · '+Math.round(num(d.percent))+'%':'')}
   return bambu.err||'Buscando el puente...';
+}
+function bambuCloud(){
+  var id=bambuGist();
+  if(!id){bambu.ok=false;bambu.err='No encuentro el puente en '+bambuUrl()+'. ¿Está abierto en tu computadora? Para verlo desde otra red, pon el ID de la nube.';bambuChanged();return}
+  if(Date.now()-(bambu.lastCloud||0)<75000)return;
+  bambu.lastCloud=Date.now();
+  fetch('https://api.github.com/gists/'+encodeURIComponent(id),{cache:'no-store',headers:{Accept:'application/vnd.github+json'}}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()}).then(function(g){
+    var f=g.files&&g.files['estado.json'];if(!f)throw new Error('sin archivo');
+    var d=JSON.parse(f.content),age=Date.now()/1000-num(d.updated);
+    bambu.via='nube';bambu.t=Date.now();bambu.d=d;
+    if(age>300){bambu.ok=false;bambu.err='La nube no tiene datos recientes. ¿Está encendida la PC con el puente?'}
+    else if(!d.connected){bambu.ok=false;bambu.err='El puente no ve la impresora.'}
+    else{bambu.ok=true;bambu.err=''}
+    bambuChanged()
+  }).catch(function(){bambu.ok=false;bambu.err='No pude leer la nube. Revisa el ID.';bambuChanged()});
 }
 function bambuPoll(){
   if(!bambuOn())return;
   var ctl=('AbortController' in window)?new AbortController():null,to=setTimeout(function(){if(ctl)ctl.abort()},4000);
   fetch(bambuUrl()+'/status',{cache:'no-store',signal:ctl?ctl.signal:undefined}).then(function(r){return r.json()}).then(function(d){
-    clearTimeout(to);bambu.ok=!!d.connected;bambu.t=Date.now();bambu.d=d;bambu.err=d.connected?'':'El puente funciona, pero no ve la impresora. Revisa IP, serial y código.';bambuChanged()
-  }).catch(function(){clearTimeout(to);bambu.ok=false;bambu.err='No encuentro el puente en '+bambuUrl()+'. ¿Está abierto bambu_puente.py en tu computadora?';bambuChanged()});
+    clearTimeout(to);bambu.via='local';bambu.ok=!!d.connected;bambu.t=Date.now();bambu.d=d;bambu.err=d.connected?'':'El puente funciona, pero no ve la impresora. Revisa IP, serial y código.';bambuChanged()
+  }).catch(function(){clearTimeout(to);bambuCloud()});
 }
 function bambuChanged(){
   var d=bambu.d||{},sig=[bambu.ok,d.state,Math.round(num(d.percent)),Math.round(num(d.remainMin)),d.layer].join('|');
@@ -1620,6 +1636,7 @@ function viewAjustes(){
   '<section class="card stack"><h2>Impresora Bambu Lab</h2><p class="hint">Muestra el avance real de la impresión en la barra de Inicio. Necesita el puente (bambu_puente.py) abierto en tu computadora.</p>'+
     '<label class="check"><input type="checkbox" data-s="bambuOn"'+(s.bambuOn?' checked':'')+'>Usar avance en vivo</label>'+
     '<div class="f"><label for="s-bambuUrl">Dirección del puente</label><input id="s-bambuUrl" data-s="bambuUrl" type="text" inputmode="url" autocapitalize="none" autocorrect="off" value="'+esc(s.bambuUrl||'http://localhost:8765')+'"></div>'+
+    '<div class="f"><label for="s-bambuGist">ID de la nube (para verlo fuera de casa)</label><input id="s-bambuGist" data-s="bambuGist" type="text" autocapitalize="none" autocorrect="off" value="'+esc(s.bambuGist||'')+'"><span class="hint">Lo muestra el puente al configurar el token de GitHub.</span></div>'+
     '<p class="small muted" id="bb-status" aria-live="polite">'+bambuStatusTxt()+'</p></section>'+
   '<section class="card stack"><h2>Tu negocio</h2>'+sf('Nombre','negocio','Aparece en cotizaciones y etiquetas.',{mode:'text'})+sf('Teléfono','telefono','',{mode:'tel'})+sf('Ciudad','ciudad','',{mode:'text'})+
     '<div class="f"><label for="s-direccion">Dirección del remitente</label><textarea id="s-direccion" data-s="direccion" style="min-height:72px">'+esc(s.direccion)+'</textarea></div>'+
@@ -1640,7 +1657,7 @@ function setSetting(t){
   else if(NUMKEYS.indexOf(k)>-1)S.settings[k]=num(t.value);
   else S.settings[k]=t.value;
   saveSoon();
-  if(k==='bambuOn'||k==='bambuUrl'){bambu.ok=false;bambu.err='';bambuPoll();var el=document.getElementById('bb-status');if(el)el.textContent=bambuStatusTxt()}
+  if(k==='bambuOn'||k==='bambuUrl'||k==='bambuGist'){bambu.lastCloud=0;bambu.ok=false;bambu.err='';bambuPoll();var el=document.getElementById('bb-status');if(el)el.textContent=bambuStatusTxt()}
 }
 function viewRespaldo(){
   var cs={ok:'Tus datos se guardan en tu cuenta y en este dispositivo.',err:'No se pudo guardar en tu cuenta. Los datos siguen en este dispositivo.',off:'Los datos se guardan solo en este dispositivo.'}[cloud.state];
