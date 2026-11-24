@@ -1109,27 +1109,38 @@ function bambuStatusTxt(){
   if(bambuFresh()){var d=bambu.d;return 'Conectado'+(bambu.via==='nube'?' por la nube':'')+' · '+({RUNNING:'imprimiendo',PAUSE:'en pausa',FINISH:'terminó',IDLE:'libre',PREPARE:'preparando',FAILED:'con error'}[d.state]||d.state)+(d.state==='RUNNING'?' · '+Math.round(num(d.percent))+'%':'')}
   return bambu.err||'Buscando el puente...';
 }
+function bambuApply(){
+  var L=bambu.loc,C=bambu.cl,use=null;
+  if(L&&L.ok&&Date.now()-L.t<20000)use=['local',L];
+  else if(C&&C.ok&&Date.now()-C.t<110000)use=['nube',C];
+  if(use){bambu.via=use[0];bambu.ok=true;bambu.t=use[1].t;bambu.d=use[1].d;bambu.err=''}
+  else{bambu.ok=false;bambu.err=(C&&C.err&&!(L&&L.ok))?C.err:((L&&L.err)||'Buscando el puente...')}
+  bambuChanged();
+}
 function bambuCloud(){
-  var id=bambuGist();
-  if(!id){bambu.ok=false;bambu.err='No encuentro el puente en '+bambuUrl()+'. ¿Está abierto en tu computadora? Para verlo desde otra red, pon el ID de la nube.';bambuChanged();return}
+  var id=bambuGist();if(!id)return;
   if(Date.now()-(bambu.lastCloud||0)<75000)return;
   bambu.lastCloud=Date.now();
   fetch('https://api.github.com/gists/'+encodeURIComponent(id),{cache:'no-store',headers:{Accept:'application/vnd.github+json'}}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()}).then(function(g){
     var f=g.files&&g.files['estado.json'];if(!f)throw new Error('sin archivo');
-    var d=JSON.parse(f.content),age=Date.now()/1000-num(d.updated);
-    bambu.via='nube';bambu.t=Date.now();bambu.d=d;
-    if(age>300){bambu.ok=false;bambu.err='La nube no tiene datos recientes. ¿Está encendida la PC con el puente?'}
-    else if(!d.connected){bambu.ok=false;bambu.err='El puente no ve la impresora.'}
-    else{bambu.ok=true;bambu.err=''}
-    bambuChanged()
-  }).catch(function(){bambu.ok=false;bambu.err='No pude leer la nube. Revisa el ID.';bambuChanged()});
+    var d=JSON.parse(f.content),age=Date.now()/1000-num(d.updated),c={ok:false,t:Date.now(),d:d,err:''};
+    if(age>300)c.err='La nube no tiene datos recientes. ¿Está encendida la PC con el puente?';
+    else if(!d.connected)c.err='El puente no ve la impresora. Si la PC no está en la red de la impresora, no podrá leerla.';
+    else c.ok=true;
+    bambu.cl=c;bambuApply()
+  }).catch(function(){bambu.cl={ok:false,t:Date.now(),err:'No pude leer la nube. Revisa el ID.'};bambuApply()});
 }
 function bambuPoll(){
   if(!bambuOn())return;
   var ctl=('AbortController' in window)?new AbortController():null,to=setTimeout(function(){if(ctl)ctl.abort()},4000);
   fetch(bambuUrl()+'/status',{cache:'no-store',signal:ctl?ctl.signal:undefined}).then(function(r){return r.json()}).then(function(d){
-    clearTimeout(to);bambu.via='local';bambu.ok=!!d.connected;bambu.t=Date.now();bambu.d=d;bambu.err=d.connected?'':'El puente funciona, pero no ve la impresora. Revisa IP, serial y código.';bambuChanged()
-  }).catch(function(){clearTimeout(to);bambuCloud()});
+    clearTimeout(to);bambu.loc={ok:!!d.connected,t:Date.now(),d:d,err:d.connected?'':'El puente funciona, pero no ve la impresora. Revisa IP, serial y código.'};
+    if(!d.connected&&bambuGist())bambuCloud();
+    bambuApply()
+  }).catch(function(){clearTimeout(to);
+    bambu.loc={ok:false,t:Date.now(),err:'No encuentro el puente en '+bambuUrl()+'. ¿Está abierto en tu computadora? Para verlo desde otra red, pon el ID de la nube.'};
+    if(bambuGist())bambuCloud();
+    bambuApply()});
 }
 function bambuChanged(){
   var d=bambu.d||{},sig=[bambu.ok,d.state,Math.round(num(d.percent)),Math.round(num(d.remainMin)),d.layer].join('|');
@@ -1657,7 +1668,7 @@ function setSetting(t){
   else if(NUMKEYS.indexOf(k)>-1)S.settings[k]=num(t.value);
   else S.settings[k]=t.value;
   saveSoon();
-  if(k==='bambuOn'||k==='bambuUrl'||k==='bambuGist'){bambu.lastCloud=0;bambu.ok=false;bambu.err='';bambuPoll();var el=document.getElementById('bb-status');if(el)el.textContent=bambuStatusTxt()}
+  if(k==='bambuOn'||k==='bambuUrl'||k==='bambuGist'){bambu.lastCloud=0;bambu.loc=null;bambu.cl=null;bambu.ok=false;bambu.err='';bambuPoll();var el=document.getElementById('bb-status');if(el)el.textContent=bambuStatusTxt()}
 }
 function viewRespaldo(){
   var cs={ok:'Tus datos se guardan en tu cuenta y en este dispositivo.',err:'No se pudo guardar en tu cuenta. Los datos siguen en este dispositivo.',off:'Los datos se guardan solo en este dispositivo.'}[cloud.state];
