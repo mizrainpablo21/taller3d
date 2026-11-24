@@ -22,6 +22,22 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 STATE = {"connected": False, "state": "IDLE", "percent": 0, "remainMin": 0,
          "layer": 0, "totalLayers": 0, "file": "", "nozzle": 0, "bed": 0, "updated": 0}
 LOCK = threading.Lock()
+CFG = os.path.join(os.path.expanduser("~"), ".bambu_puente.json")
+
+def load_cfg():
+    try:
+        with open(CFG, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_cfg(d):
+    with open(CFG, "w", encoding="utf-8") as f:
+        json.dump(d, f)
+    try:
+        os.chmod(CFG, 0o600)
+    except Exception:
+        pass
 
 def merge(p):
     m = {"gcode_state": "state", "mc_percent": "percent", "mc_remaining_time": "remainMin",
@@ -134,17 +150,35 @@ class H(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--olvidar", action="store_true", help="borra los datos guardados")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--ip", default=os.environ.get("BAMBU_IP"))
     ap.add_argument("--serial", default=os.environ.get("BAMBU_SERIAL"))
     a = ap.parse_args()
+    if a.olvidar:
+        try:
+            os.remove(CFG)
+            print("Datos borrados.")
+        except OSError:
+            print("No había datos guardados.")
+        return
     if a.demo:
         threading.Thread(target=run_demo, daemon=True).start()
         print("Modo demo: simulando una impresión.")
     else:
-        ip = a.ip or input("IP de la impresora: ").strip()
-        serial = a.serial or input("Número de serie: ").strip()
-        code = os.environ.get("BAMBU_CODE") or getpass.getpass("Código de acceso (no se ve al escribir): ").strip()
+        cfg = load_cfg()
+        ip = a.ip or cfg.get("ip")
+        serial = a.serial or cfg.get("serial")
+        code = os.environ.get("BAMBU_CODE") or cfg.get("code")
+        if not (ip and serial and code):
+            if not sys.stdin or not sys.stdin.isatty():
+                return  # arranque automático sin datos guardados: no hay a quién preguntar
+            ip = ip or input("IP de la impresora: ").strip()
+            serial = serial or input("Número de serie: ").strip()
+            code = code or getpass.getpass("Código de acceso (no se ve al escribir): ").strip()
+            if input("¿Guardar estos datos para no volver a escribirlos? (S/N): ").strip().lower() != "n":
+                save_cfg({"ip": ip, "serial": serial, "code": code})
+                print("Guardado en %s" % CFG)
         threading.Thread(target=run_mqtt, args=(ip, serial, code), daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), H)
     print("Listo. La app puede leer http://localhost:%d/status  (Ctrl+C para cerrar)" % a.port)
