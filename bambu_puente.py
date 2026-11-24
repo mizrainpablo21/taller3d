@@ -113,12 +113,25 @@ def run_mqtt(ip, serial, code):
         except Exception:
             pass
 
+def tls_context():
+    """Usa los certificados de Windows (truststore) o certifi; nunca desactiva la verificación."""
+    try:
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        pass
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
 def gh(method, path, token, body=None):
     req = urllib.request.Request("https://api.github.com" + path, method=method,
         data=json.dumps(body).encode() if body is not None else None,
         headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
                  "User-Agent": "taller3d-puente", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urllib.request.urlopen(req, timeout=15, context=tls_context()) as r:
         return json.loads(r.read() or b"{}")
 
 def run_gist(token):
