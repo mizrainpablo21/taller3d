@@ -197,11 +197,15 @@ class H(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--nuevo-token", action="store_true", help="pide un token de GitHub nuevo")
     ap.add_argument("--olvidar", action="store_true", help="borra los datos guardados")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--ip", default=os.environ.get("BAMBU_IP"))
     ap.add_argument("--serial", default=os.environ.get("BAMBU_SERIAL"))
     a = ap.parse_args()
+    if a.nuevo_token:
+        c = load_cfg(); c.pop("gh_token", None); c.pop("gist_id", None); save_cfg(c)
+        print("Token anterior borrado. Se pedirá uno nuevo.")
     if a.olvidar:
         try:
             os.remove(CFG)
