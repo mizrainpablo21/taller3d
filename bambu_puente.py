@@ -49,6 +49,16 @@ def run_mqtt(ip, serial, code):
     topic = "device/%s/report" % serial
 
     def on_connect(client, *a):
+        rc = a[2] if len(a) > 2 else 0
+        try:
+            rc = rc.value if hasattr(rc, "value") else int(rc)
+        except Exception:
+            pass
+        if rc != 0:
+            print("La impresora rechazó la conexión (código %s)." % rc)
+            if rc in (4, 5, 134, 135):
+                print("  -> El código de acceso parece incorrecto. Cierra con Ctrl+C y vuelve a abrir.")
+            return
         client.subscribe(topic)
         client.publish("device/%s/request" % serial,
                        json.dumps({"pushing": {"sequence_id": "0", "command": "pushall"}}))
@@ -65,10 +75,17 @@ def run_mqtt(ip, serial, code):
     def on_disconnect(*a):
         with LOCK:
             STATE["connected"] = False
-        print("Desconectado; reintentando...")
+        print("Sin conexión con la impresora; reintentando...")
 
     c.on_connect, c.on_message, c.on_disconnect = on_connect, on_message, on_disconnect
     c.reconnect_delay_set(2, 30)
+    import socket
+    try:
+        socket.create_connection((ip, 8883), timeout=5).close()
+        print("La impresora responde en %s. Conectando..." % ip)
+    except Exception as e:
+        print("No llego a la impresora en %s:8883 (%s)." % (ip, e))
+        print("  -> Revisa que esté encendida, en la misma red wifi que esta PC y con el Modo LAN activado.")
     c.connect_async(ip, 8883, 60)
     c.loop_start()
     # pide el estado completo cada 30 s por si faltan campos
